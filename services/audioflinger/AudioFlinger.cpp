@@ -988,6 +988,22 @@ status_t AudioFlinger::setStreamMute(audio_stream_type_t stream, bool muted)
     return NO_ERROR;
 }
 
+status_t AudioFlinger::setStreamMuteNoPermission(audio_stream_type_t stream, bool muted)
+{
+    if (uint32_t(stream) >= AUDIO_STREAM_CNT ||
+        uint32_t(stream) == AUDIO_STREAM_ENFORCED_AUDIBLE) {
+        ALOGE("setStreamMute() invalid stream %d", stream);
+        return BAD_VALUE;
+    }
+
+    AutoMutex lock(mLock);
+    mStreamTypes[stream].mute = muted;
+    for (size_t i = 0; i < mPlaybackThreads.size(); i++)
+        mPlaybackThreads.valueAt(i)->setStreamMute(stream, muted);
+
+    return NO_ERROR;
+}
+
 float AudioFlinger::streamVolume(audio_stream_type_t stream, audio_io_handle_t output) const
 {
     status_t status = checkStreamType(stream);

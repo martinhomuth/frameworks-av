@@ -84,6 +84,16 @@
 #include "HTTPBase.h"
 #include "RemoteDisplay.h"
 
+
+/* add by Gary. start {{----------------------------------- */
+/* 2012-03-12 */
+//* add the global interfaces to control the subtitle gate  
+#define PROP_GLOBAL_SUB_GATE_KEY           "persist.mediasw.sft.sub_gate"
+#define PROP_ENABLE_GLOBAL_SUB             "enable global sub"
+#define PROP_DISABLE_GLOBAL_SUB            "disable global sub"
+#define PROP_GLOBAL_SUB_GATE_DEFAULT_VALUE  PROP_ENABLE_GLOBAL_SUB
+/* add by Gary. end   -----------------------------------}} */
+
 namespace {
 using android::media::Metadata;
 using android::status_t;
@@ -265,6 +275,7 @@ static bool checkPermission(const char* permissionString) {
 // TODO: Find real cause of Audio/Video delay in PV framework and remove this workaround
 /* static */ int MediaPlayerService::AudioOutput::mMinBufferCount = 4;
 /* static */ bool MediaPlayerService::AudioOutput::mIsOnEmulator = false;
+/* static */ int MediaPlayerService::mHdmiPlugged = 0;
 
 void MediaPlayerService::instantiate() {
     defaultServiceManager()->addService(
@@ -293,6 +304,16 @@ MediaPlayerService::MediaPlayerService()
     notifier.noteResetAudio();
 
     MediaPlayerFactory::registerBuiltinFactories();
+	/*add by aw. start*/
+	char wfd_value[PROPERTY_VALUE_MAX];
+	if (property_get("persist.service.wfd.enable", wfd_value, "0") &&
+			(!strcmp(wfd_value, "1") || !strcasecmp(wfd_value, "true"))) {
+		if(property_set("persist.service.wfd.enable", "0")) {
+			ALOGD("set property persist.service.wfd.enable failed!");
+		}
+	}
+	ALOGD("wfd_value: %s",wfd_value);
+	/*add by aw. end*/
 }
 
 MediaPlayerService::~MediaPlayerService()
@@ -726,6 +747,17 @@ status_t MediaPlayerService::Client::setDataSource(
             return NO_INIT;
         }
 
+        //* save properties before creating the real player 
+        p->setSubGate(mSubGate);
+        p->setSubDelay(mSubDelay);
+        p->setSubCharset(mSubCharset);
+        //* set audio channel mute
+        p->setChannelMuteMode(mMuteMode);
+
+        // aw extend. set BDFolderPlayMode before . eric_wang. 20140307.
+        p->generalInterface(MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE, mBDFolderPlayMode, 0, 0, NULL);
+        // aw extend end. store BDFolderPlayMode. eric_wang. 20140307.
+      
         setDataSource_post(p, p->setDataSource(httpService, url, headers));
         return mStatus;
     }
@@ -780,8 +812,38 @@ status_t MediaPlayerService::Client::setDataSource(
         return NO_INIT;
     }
 
+    //* save properties before creating the real player 
+    p->setSubGate(mSubGate);
+    p->setSubDelay(mSubDelay);
+    p->setSubCharset(mSubCharset);
+
+    //* set audio channel mute
+    p->setChannelMuteMode(mMuteMode);
+
     // now set data source
     setDataSource_post(p, p->setDataSource(source));
+    return mStatus;
+}
+
+status_t MediaPlayerService::Client::setDataSource(
+        const sp<IStreamSource> &source, int type) {
+
+	sp<MediaPlayerBase> p = setDataSource_pre(AW_PLAYER);
+	if (p == NULL) {
+		return NO_INIT;
+	}
+
+    //* save properties before creating the real player 
+    p->setSubGate(mSubGate);
+    p->setSubDelay(mSubDelay);
+    p->setSubCharset(mSubCharset);
+    //* set audio channel mute
+    p->setChannelMuteMode(mMuteMode);
+
+    setDataSource_post(p, p->setDataSource(source));
+
+    generalInterface(MEDIAPLAYER_CMD_SET_STREAMING_TYPE, type, 0, 0, NULL);
+
     return mStatus;
 }
 
@@ -793,6 +855,14 @@ status_t MediaPlayerService::Client::setDataSource(
     if (p == NULL) {
         return NO_INIT;
     }
+	//* save properties before creating the real player 
+    p->setSubGate(mSubGate);
+    p->setSubDelay(mSubDelay);
+    p->setSubCharset(mSubCharset);
+
+    //* set audio channel mute
+    p->setChannelMuteMode(mMuteMode);
+	
     // now set data source
     setDataSource_post(p, p->setDataSource(dataSource));
     return mStatus;
@@ -1185,6 +1255,244 @@ status_t MediaPlayerService::Client::getParameter(int key, Parcel *reply) {
     return p->getParameter(key, reply);
 }
 
+/* add by Gary. start {{----------------------------------- */
+/* 2011-9-15 15:41:36 */
+/* expend interfaces about subtitle, track and so on */
+status_t MediaPlayerService::Client::setSubGate(bool showSub)
+{
+    ALOGV("MediaPlayerService::Client::setSubGate(): showSub = %d", showSub);
+    mSubGate = showSub;
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return OK;
+    return p->setSubGate(showSub);
+}
+
+bool MediaPlayerService::Client::getSubGate()
+{
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return true;
+    return p->getSubGate();
+}
+
+status_t MediaPlayerService::Client::setSubCharset(const char *charset)
+{
+    strcpy(mSubCharset, charset);
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return OK;
+    return p->setSubCharset(charset);
+}
+
+status_t MediaPlayerService::Client::getSubCharset(char *charset)
+{
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return UNKNOWN_ERROR;
+    return p->getSubCharset(charset);
+}
+
+status_t MediaPlayerService::Client::setSubDelay(int time)
+{
+    mSubDelay = time;
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return OK;
+    return p->setSubDelay(time);
+}
+
+int MediaPlayerService::Client::getSubDelay()
+{
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return 0;
+    return p->getSubDelay();
+}
+/* add by Gary. end   -----------------------------------}} */
+
+
+/* add by Gary. start {{----------------------------------- */
+/* 2011-11-14 */
+/* support scale mode */
+status_t MediaPlayerService::Client::enableScaleMode(bool enable, int width, int height)
+{
+    mEnableScaleMode = enable;
+    mScaleWidth = width;
+    mScaleHeight = height;
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return UNKNOWN_ERROR;
+    return p->enableScaleMode(enable, width, height);
+}
+/* add by Gary. end   -----------------------------------}} */
+
+//* set audio channel mute 
+status_t MediaPlayerService::Client::setChannelMuteMode(int muteMode)
+{
+    mMuteMode = muteMode;
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return OK;
+    return p->setChannelMuteMode(muteMode);
+}
+
+int MediaPlayerService::Client::getChannelMuteMode()
+{
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) 
+        return -1;
+    return p->getChannelMuteMode();
+}
+
+status_t MediaPlayerService::Client::getMediaPlayerInfo( struct MediaPlayerInfo* mediaPlayerInfo) 
+{
+    sp<MediaPlayerBase> p = getPlayer();
+    if (p == 0) return UNKNOWN_ERROR;
+
+	p->getMediaPlayerInfo(mediaPlayerInfo);
+	
+	if ((p->isPlaying()) && (p->getMeidaPlayerState() != PLAYER_STATE_SUSPEND))
+	{
+	    mediaPlayerInfo->playState = 1;
+	}else {
+	    mediaPlayerInfo->playState = 0;
+	}
+	
+    return NO_ERROR;
+}
+
+//* add the global interfaces to control the subtitle gate  
+status_t MediaPlayerService::setGlobalSubGate(bool showSub)
+{
+    ALOGV("MediaPlayerService::setGlobalSubGate(): enable = %d", showSub);
+    if( showSub == mGlobalSubGate )
+        return OK;
+        
+    status_t ret = OK;
+    for (int i = 0, n = mClients.size(); i < n; ++i) {
+        sp<Client> c = mClients[i].promote();
+        if (c != 0) {
+            status_t temp = c->setSubGate(showSub);
+            if( temp != OK )
+                ret = temp;
+        }
+    }
+    
+    mGlobalSubGate = showSub;
+    
+    if(mGlobalSubGate)
+        property_set(PROP_GLOBAL_SUB_GATE_KEY, PROP_ENABLE_GLOBAL_SUB);
+    else
+        property_set(PROP_GLOBAL_SUB_GATE_KEY, PROP_DISABLE_GLOBAL_SUB);
+    char prop_value[PROPERTY_VALUE_MAX];
+    property_get(PROP_GLOBAL_SUB_GATE_KEY, prop_value, "no showSub");
+
+    return ret;
+}
+
+bool MediaPlayerService::getGlobalSubGate()
+{
+    return mGlobalSubGate;
+}
+
+status_t MediaPlayerService::getMediaPlayerList() 
+{
+   ALOGV("getMediaPlayerList");
+   status_t ret = 0;
+   ret = mClients.size();
+    
+   return ret;
+}
+
+status_t MediaPlayerService::getMediaPlayerInfo(int mediaPlayerId, 
+	                                  struct MediaPlayerInfo* mediaPlayerInfo) 
+{
+	ALOGV("getMediaPlayerInfo mClients[%d]", mediaPlayerId);
+
+	
+	mediaPlayerInfo->height = 0;
+	mediaPlayerInfo->width = 0;
+	mediaPlayerInfo->codecType = 0;
+	mediaPlayerInfo->playState = 0;
+	
+	if ((mClients.size() > 0) && (mediaPlayerId >= 0) && ((size_t)mediaPlayerId < mClients.size()))
+	{
+	    for (int i = 0, n = mClients.size(); i < n; ++i) {
+	        sp<Client> c = mClients[i].promote();
+	        if (c != 0) {
+				if (i == mediaPlayerId)
+				{
+	                c->getMediaPlayerInfo(mediaPlayerInfo);
+					return OK;
+				}
+	        }
+	    }
+	}
+	return NO_ERROR;
+}
+
+//* add two general interfaces for expansibility 
+status_t MediaPlayerService::generalGlobalInterface(int cmd, int int1, int int2, int int3, void *p)
+{
+    switch(cmd){
+        case MEDIAPLAYER_GLOBAL_CMD_TEST:{
+            ALOGD("MEDIAPLAYER_GLOBAL_CMD_TEST: int1 = %d", int1);
+            *((int *)p) = 111;
+            ALOGD("*p = %d", *((int *)p));
+        }break;
+		case MEDIAPLAYER_CMD_IS_ROTATABLE:{
+			ALOGD("MEDIAPLAYER_CMD_IS_ROTATABLE...");
+		}break;
+		case MEDIAPLAYER_CMD_SET_ROTATION:{
+			status_t ret = OK;
+            if(1 == mHdmiPlugged)
+            {
+                ALOGD("(f:%s, l:%d)hdmi state is [%d], don't tell vdeclib rotate!", __FUNCTION__, __LINE__, mHdmiPlugged);
+                return ret;
+            }
+			for (int i = 0, n = mClients.size(); i < n; ++i) {
+				sp<Client> c = mClients[i].promote();
+				if (c != 0) {
+					status_t temp = c->generalInterface(MEDIAPLAYER_CMD_SET_ROTATION, int1, int2, int3, p);
+					if( temp != OK )
+						ret = temp;
+				}
+			}
+			return ret;
+		}break;
+        case MEDIAPLAYER_CMD_SET_HDMISTATE:{
+            ALOGD("(f:%s, l:%d)hdmi state is [%d]", __FUNCTION__, __LINE__, int1);
+            mHdmiPlugged = int1;
+        }break;
+        default:{
+            ALOGW("cmd %d is NOT defined.", cmd);
+        }break;
+    }
+    return OK;
+}
+
+status_t MediaPlayerService::Client::generalInterface(int cmd, int int1, int int2, int int3, void *p)
+{
+    sp<MediaPlayerBase> mp = getPlayer();
+    if(cmd == MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE)
+    {
+        mBDFolderPlayMode = int1;
+    }
+    if (mp == 0) 
+        return UNKNOWN_ERROR;
+
+    ALOGD("generalInterface cmd=%d int1=%d int2=%d",cmd, int1, int2);
+    if(cmd == MEDIAPLAYER_CMD_RELEASE_SURFACE_BYHAND) {
+        //disconnectNativeWindow();
+        //IPCThreadState::self()->flushCommands();
+	    ALOGD("RELEASE_SURFACE_BYHAND not implement now");
+        return OK;
+    }
+
+    return mp->generalInterface(cmd, int1, int2, int3, p);
+}
+
 status_t MediaPlayerService::Client::setRetransmitEndpoint(
         const struct sockaddr_in* endpoint) {
 
@@ -1235,7 +1543,7 @@ status_t MediaPlayerService::Client::getRetransmitEndpoint(
 }
 
 void MediaPlayerService::Client::notify(
-        void* cookie, int msg, int ext1, int ext2, const Parcel *obj)
+        void* cookie, int msg, int ext1, int ext2, const Parcel *obj, Parcel *replyObj)
 {
     Client* client = static_cast<Client*>(cookie);
     if (client == NULL) {
@@ -1269,7 +1577,7 @@ void MediaPlayerService::Client::notify(
 
     if (c != NULL) {
         ALOGV("[%d] notify (%p, %d, %d, %d)", client->mConnId, cookie, msg, ext1, ext2);
-        c->notify(msg, ext1, ext2, obj);
+        c->notify(msg, ext1, ext2, obj, replyObj);
     }
 }
 

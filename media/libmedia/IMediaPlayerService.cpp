@@ -49,6 +49,22 @@ enum {
     PULL_BATTERY_DATA,
     LISTEN_FOR_REMOTE_DISPLAY,
     GET_CODEC_LIST,
+
+	/* add by Gary. start {{----------------------------------- */
+    /* 2012-03-12 */
+    /* add the global interfaces to control the subtitle gate  */
+    SET_GLOBAL_SUB_GATE,
+    GET_GLOBAL_SUB_GATE,
+    /* add by Gary. end   -----------------------------------}} */
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    GENERAL_GLOBAL_INTERFACE,
+    /* add by Gary. end   -----------------------------------}} */
+	/* add by aw. start {{----------------------------------- */
+	GET_MEDIAPLAYER_LIST,
+	GET_MEDIAPLAYER_INFO,
+	/* add by aw. end   -----------------------------------}} */
 };
 
 class BpMediaPlayerService: public BpInterface<IMediaPlayerService>
@@ -147,6 +163,84 @@ public:
         remote()->transact(GET_CODEC_LIST, data, &reply);
         return interface_cast<IMediaCodecList>(reply.readStrongBinder());
     }
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-12 */
+    /* add the global interfaces to control the subtitle gate  */
+    status_t setGlobalSubGate(bool showSub)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayerService::getInterfaceDescriptor());
+        data.writeInt32(showSub);
+        remote()->transact(SET_GLOBAL_SUB_GATE, data, &reply);
+        return reply.readInt32();
+    }
+    bool getGlobalSubGate()
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayerService::getInterfaceDescriptor());
+        remote()->transact(GET_GLOBAL_SUB_GATE, data, &reply);
+        return reply.readInt32();
+    }
+    /* add by Gary. end   -----------------------------------}} */
+	// get mediaplayer list about mediaplayer
+	status_t getMediaPlayerList()
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayerService::getInterfaceDescriptor());
+        remote()->transact(GET_MEDIAPLAYER_LIST, data, &reply);
+        return reply.readInt32();
+    }
+	// get information about a mediaplayer
+    status_t getMediaPlayerInfo(int mediaPlayerId, 
+                                   struct MediaPlayerInfo* mediaPlayerInfo) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayerService::getInterfaceDescriptor());
+        data.writeInt32(mediaPlayerId);
+        remote()->transact(GET_MEDIAPLAYER_INFO, data, &reply);
+        mediaPlayerInfo->width = reply.readInt32();
+        mediaPlayerInfo->height = reply.readInt32();
+		mediaPlayerInfo->codecType = reply.readInt32();
+        mediaPlayerInfo->playState = reply.readInt32();
+        return reply.readInt32();
+    }
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    status_t generalGlobalInterface(int cmd, int int1, int /* int2 */ , int /* int3 */ , void *p)
+    {
+        Parcel data, reply;
+        status_t ret;
+        data.writeInterfaceToken(IMediaPlayerService::getInterfaceDescriptor());
+        
+        data.writeInt32(cmd);                               // the first input value MUST be always the command.
+        switch(cmd){
+            case MEDIAPLAYER_GLOBAL_CMD_TEST:{
+                data.writeInt32(int1);
+                remote()->transact(GENERAL_GLOBAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+                *((int *)p) = reply.readInt32();
+            }break;
+			case MEDIAPLAYER_CMD_IS_ROTATABLE:{
+                remote()->transact(GENERAL_GLOBAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+                *((int *)p) = reply.readInt32();
+			}break;
+			case MEDIAPLAYER_CMD_SET_ROTATION:{
+                data.writeInt32(int1);
+                remote()->transact(GENERAL_GLOBAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+			}break;
+            case MEDIAPLAYER_CMD_SET_HDMISTATE:{
+                data.writeInt32(int1);
+                remote()->transact(GENERAL_GLOBAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+			}break;
+            default:
+                return BAD_VALUE;
+        }
+        return ret;
+    }
+    /* add by Gary. end   -----------------------------------}} */
 };
 
 IMPLEMENT_META_INTERFACE(MediaPlayerService, "android.media.IMediaPlayerService");
@@ -229,6 +323,77 @@ status_t BnMediaPlayerService::onTransact(
             CHECK_INTERFACE(IMediaPlayerService, data, reply);
             sp<IMediaCodecList> mcl = getCodecList();
             reply->writeStrongBinder(IInterface::asBinder(mcl));
+            return NO_ERROR;
+        } break;
+        
+       //* add the global interfaces to control the subtitle gate  
+        case SET_GLOBAL_SUB_GATE: {
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(setGlobalSubGate(data.readInt32()));
+            return NO_ERROR;
+        } break;
+        case GET_GLOBAL_SUB_GATE: {
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(getGlobalSubGate());
+            return NO_ERROR;
+        } break;
+		case GET_MEDIAPLAYER_LIST: {
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(getMediaPlayerList());
+            return NO_ERROR;
+        } break;
+		case GET_MEDIAPLAYER_INFO: {
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+			struct MediaPlayerInfo mediaPlayerInfo;
+            memset(&mediaPlayerInfo, 0, sizeof(mediaPlayerInfo));
+            status_t result = getMediaPlayerInfo(data.readInt32(), &mediaPlayerInfo);
+            reply->writeInt32(mediaPlayerInfo.width);
+            reply->writeInt32(mediaPlayerInfo.height);
+			reply->writeInt32(mediaPlayerInfo.codecType);
+            reply->writeInt32(mediaPlayerInfo.playState);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        } break;
+        //* add general interfaces for expansibility 
+        case GENERAL_GLOBAL_INTERFACE: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            int cmd;
+            int int1 = 0;
+            int int2 = 0;
+            int int3 = 0;
+            void *p  = NULL;
+            status_t ret;
+            
+            cmd = data.readInt32();
+            switch(cmd){
+                case MEDIAPLAYER_GLOBAL_CMD_TEST:{
+                    int1 = data.readInt32();
+                    int data = 2;
+                    p = &data;
+                    ret = generalGlobalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+                    reply->writeInt32(data);
+                }break;
+                case MEDIAPLAYER_CMD_IS_ROTATABLE:{
+                    int rotatable;
+                    p = &rotatable;
+                    ret = generalGlobalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+                    reply->writeInt32(rotatable);
+                }break;
+				case MEDIAPLAYER_CMD_SET_ROTATION:{
+                    int1 = data.readInt32();
+                    ret = generalGlobalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+				}break;
+                case MEDIAPLAYER_CMD_SET_HDMISTATE:{
+                    int1 = data.readInt32();
+                    ret = generalGlobalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+				}break;
+                default:
+                    return BAD_VALUE;
+            }
             return NO_ERROR;
         } break;
         default:

@@ -45,6 +45,7 @@ public:
     virtual VideoFrame* getFrameAtTime(int64_t timeUs, int option) = 0;
     virtual MediaAlbumArt* extractAlbumArt() = 0;
     virtual const char* extractMetadata(int keyCode) = 0;
+    virtual sp<IMemory> getStreamAtTime(int64_t timeUs) = 0;
 };
 
 // MediaMetadataRetrieverInterface
@@ -57,6 +58,7 @@ public:
     virtual VideoFrame* getFrameAtTime(int64_t timeUs, int option) { return NULL; }
     virtual MediaAlbumArt* extractAlbumArt() { return NULL; }
     virtual const char* extractMetadata(int keyCode) { return NULL; }
+    virtual sp<IMemory> getStreamAtTime(int64_t timeUs) {return NULL;}
 };
 
 }; // namespace android

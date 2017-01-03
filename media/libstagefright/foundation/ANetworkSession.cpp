@@ -27,6 +27,7 @@
 #include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
+
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
@@ -35,7 +36,40 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/foundation/hexdump.h>
 
+#include <cutils/properties.h>
+#include <netinet/ip.h>
 namespace android {
+
+#define SW_DYNAMIC_ENCODE_BITRATE 1
+#define SW_DYNAMIC_ENDCOE_BITRATE_DEBUG 0
+#if SW_DYNAMIC_ENCODE_BITRATE
+/*  level     encoderBitrate    bps(video+audio)     UE
+ * level 0:     5000000         5200000            favor
+ * level 1:     3000000         4500000            very well(default)
+ * level 2:     2000000         3300000            good
+ * level 3:     1000000         1800000            soso
+ * level 4:     500000          1000000            badly
+ */
+static const size_t encoderBitrate[5] = {5000000, 3000000, 2000000, 1000000, 500000};
+//static const size_t encoderBitrateSize = sizeof(encoderBitrate)/sizeof(encoderBitrate[0]);
+
+#if SW_DYNAMIC_ENDCOE_BITRATE_DEBUG
+static int32_t gBitrate = 0;
+static int32_t getBitrate(const char *propName) {
+    char val[PROPERTY_VALUE_MAX];
+    if (property_get(propName, val, NULL)) {
+        char *end;
+        unsigned long x = strtoul(val, &end, 10);
+
+        if (*end == '\0' && end > val && x > 0) {
+            return x;
+        }
+    }
+    return 0;
+}
+#endif
+
+#endif
 
 static uint16_t U16_AT(const uint8_t *ptr) {
     return ptr[0] << 8 | ptr[1];
@@ -133,10 +167,16 @@ private:
 
     int64_t mLastStallReportUs;
 
+    // Encoder Bitrate Control
+    int32_t mBitrateLevel;//record the current encoder bitrate level
+    int64_t mAgainTimeUs;//record the time when we meet -EAGAIN
+    int64_t mRecoveryTimeUs;//record the time begin to increase bitrate
+
     void notifyError(bool send, status_t err, const char *detail);
     void notify(NotificationReason reason);
 
     void dumpFragmentStats(const Fragment &frag);
+    void notifyBitrateChange(int32_t bitrate);
 
     DISALLOW_EVIL_CONSTRUCTORS(Session);
 };
@@ -171,6 +211,9 @@ ANetworkSession::Session::Session(
       mSawSendFailure(false),
       mUDPRetries(kMaxUDPRetries),
       mLastStallReportUs(-1ll) {
+      mAgainTimeUs = -1ll;
+      mBitrateLevel = 1;
+      mRecoveryTimeUs = -1ll;
     if (mState == CONNECTED) {
         struct sockaddr_in localAddr;
         socklen_t localAddrLen = sizeof(localAddr);
@@ -570,6 +613,72 @@ status_t ANetworkSession::Session::writeMore() {
                 }
 
                 mOutFragments.erase(mOutFragments.begin());
+                #if SW_DYNAMIC_ENCODE_BITRATE
+                #if SW_DYNAMIC_ENDCOE_BITRATE_DEBUG
+                int32_t br = getBitrate("media.wfd.video-bitrate");
+                if (gBitrate != br && br != 0) {
+                    gBitrate = br;
+                    if(br == 500000)
+                        mBitrateLevel = 4;
+                    else if(br == 1000000)
+                        mBitrateLevel = 3;
+                    else if(br == 2000000)
+                        mBitrateLevel = 2;
+                    else if(br == 3000000)
+                        mBitrateLevel = 1;
+                    else if(br == 5000000)
+                        mBitrateLevel = 0;
+                    else
+                        ALOGI("br = %d, mBitrateLevel = %d", br, mBitrateLevel);
+                    notifyBitrateChange(mBitrateLevel);
+                }
+                #endif
+                // try to decrease mBitrateLevel, increase bitrate gradually in 8 seconds or 18 seconds.
+                // we meet -EAGAIN before,but now it becomes normal, we still need to wait 8 seconds.
+                if(mAgainTimeUs > 0ll && ((ALooper::GetNowUs() - mAgainTimeUs)/1E6 > 8)) {
+                    mAgainTimeUs = -1ll;//reset the mAgainTimeus
+                    mRecoveryTimeUs = ALooper::GetNowUs();//get the next delay time.
+                    ALOGV("we meet -EAGAIN before,but it becomes normal after 8 seconds.");
+                    switch(mBitrateLevel) {
+                        case 1:
+                        case 2:
+                        {   // 1 --> 1
+                            if(mBitrateLevel == 1) break;
+                            // 2 --> 1
+                            ALOGI("+[%zu]--->[%zu]",
+                                    encoderBitrate[mBitrateLevel], encoderBitrate[1]);
+                            mBitrateLevel = 1;
+                            notifyBitrateChange(mBitrateLevel);
+                            break;
+                        }
+                        case 3:
+                        case 4:
+                        {   //3-->2,4-->3
+                            int32_t bak = mBitrateLevel;
+                            if(mBitrateLevel == 3)
+                                mBitrateLevel = 2;
+                            else
+                                mBitrateLevel = 3;
+                            ALOGI("+[%zu]--->[%zu]",
+                                    encoderBitrate[bak], encoderBitrate[mBitrateLevel]);
+                            notifyBitrateChange(mBitrateLevel);
+                            break;
+                        }
+                        default:
+                            ALOGE("logical error(mBitrateLevel=%d)!!!", mBitrateLevel);
+                            break;
+                    }
+                } else if (mAgainTimeUs < 0ll && mBitrateLevel > 1
+                            && mRecoveryTimeUs > 0ll
+                            && ((ALooper::GetNowUs() - mRecoveryTimeUs)/1E6 > 10) ) {
+                    mRecoveryTimeUs = -1ll;
+                    ALOGV("we may meet -EAGAIN before,after 10 seconds,wifi becomes good finally.");
+                    ALOGI("+[%zu]---->[%zu]",
+                            encoderBitrate[mBitrateLevel], encoderBitrate[1]);
+                    mBitrateLevel = 1;
+                    notifyBitrateChange(mBitrateLevel);
+                }
+                #endif
             } else if (n < 0) {
                 err = -errno;
             } else if (n == 0) {
@@ -580,6 +689,42 @@ status_t ANetworkSession::Session::writeMore() {
         if (err == -EAGAIN) {
             if (!mOutFragments.empty()) {
                 ALOGI("%zu datagrams remain queued.", mOutFragments.size());
+                #if SW_DYNAMIC_ENCODE_BITRATE
+                // try to increase mBitrateLevel, decrease bitrate rapidly in 2000 ms.
+                if(mAgainTimeUs < 0ll) {
+                    //we meet badly wireless enviroment first time.
+                    mAgainTimeUs = ALooper::GetNowUs();
+                    ALOGV("--->Initial Bitrate[%zu]<---", encoderBitrate[mBitrateLevel]);
+                } else {
+                    if( ((ALooper::GetNowUs() - mAgainTimeUs)/1E3) > 1000 ) {
+                        // after 1000 ms if we still get -EAGAIN error,
+                        // we must decrease Bitrate.
+
+                        //update for next time.
+                        mAgainTimeUs = ALooper::GetNowUs();
+
+                        int32_t encoderBitrateBak = mBitrateLevel;
+                        if(++mBitrateLevel < 3) {
+                            //change encoder bitrate: good, soso.
+                            ALOGI("-[%zu]--->[%zu]",
+                                    encoderBitrate[mBitrateLevel-1], encoderBitrate[mBitrateLevel]);
+                            notifyBitrateChange(mBitrateLevel);
+                        } else {
+                            mBitrateLevel = 3;
+                            if(encoderBitrateBak == 3) {
+                                ALOGI("Badly [%zu].", encoderBitrate[mBitrateLevel]);
+                            } else {
+                                ALOGI("-[%zu]--->[%zu]",
+                                    encoderBitrate[mBitrateLevel-1], encoderBitrate[mBitrateLevel]);
+                                //change encoder bitrate: badly.
+                                notifyBitrateChange(mBitrateLevel);
+                            }
+                        }
+                    } else {
+                        ALOGV("Time Not Reach.");
+                    }
+                }
+                #endif
             }
             err = OK;
         }
@@ -795,6 +940,16 @@ void ANetworkSession::Session::notify(NotificationReason reason) {
     msg->post();
 }
 
+void ANetworkSession::Session::notifyBitrateChange(int32_t bitrate) {
+    sp<AMessage> msg = mNotify->dup();
+    msg->setInt32("sessionID", mSessionID);
+    msg->setInt32("reason", kWhatBitrateChange);
+    #if SW_DYNAMIC_ENCODE_BITRATE
+    msg->setInt32("encoderBitrate", encoderBitrate[bitrate]);
+    #endif
+    msg->post();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 ANetworkSession::ANetworkSession()
@@ -996,7 +1151,13 @@ status_t ANetworkSession::createClientOrServer(
     }
 
     if (mode == kModeCreateUDPSession) {
+        #if 1      // use defalut size: 256k
         int size = 256 * 1024;
+        #else
+        //change UDP session receive buffer and send buffer from 256k to 1024k
+        int size = 1024 * 1024; // 1Mbytes buffer
+        ALOGD("magic test.createClientOrServer set rec snd buffer form 256k to 1M");
+        #endif
 
         res = setsockopt(s, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 
@@ -1011,6 +1172,27 @@ status_t ANetworkSession::createClientOrServer(
             err = -errno;
             goto bail2;
         }
+
+        /*
+          802.1p Class of Service     TOS Range               DSCP Range          WME Category
+          0 - Best Effort             0x00-0x1f               0-7                 Best Effort
+          1 - Background              0x20-0x3f               8-15                Background
+          2 - Spare                   0x40-0x5f               16-23               Background
+          3 - Excellent Effort        0x60-0x7f               24-25, 28-31        Best Effort
+          4 - Controlled Load         0x80-0x9f               32-39               Video
+          5 - Video (<100ms latency)  0xa0-0xbf               40-45               Video
+          6 - Voice (<10ms latency)   0x68,0xb8,0xc0-0xdf     26-27,46-47,48-55   Voice
+          7 - Network Control         0xe0-0xff               56-63               Voice
+        */
+		/*
+        uint8_t serviceType =  0xa0; //udp, video
+        res = setsockopt(s, SOL_IP, IP_TOS, (void *)&serviceType, sizeof(serviceType));
+        if(res < 0) {
+            ALOGD("setsockopt(IP_TOS) failed!");
+        } else {
+            ALOGD("udp set QoS.");
+        }
+		*/
     } else if (mode == kModeCreateTCPDatagramSessionActive) {
         int flag = 1;
         res = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -1361,6 +1543,30 @@ void ANetworkSession::threadLoop() {
                                   ntohs(remoteAddr.sin_port),
                                   clientSocket);
 
+                            /*
+                              802.1p Class of Service     TOS Range               DSCP Range          WME Category
+                              0 - Best Effort             0x00-0x1f               0-7                 Best Effort
+                              1 - Background              0x20-0x3f               8-15                Background
+                              2 - Spare                   0x40-0x5f               16-23               Background
+                              3 - Excellent Effort        0x60-0x7f               24-25, 28-31        Best Effort
+                              4 - Controlled Load         0x80-0x9f               32-39               Video
+                              5 - Video (<100ms latency)  0xa0-0xbf               40-45               Video
+                              6 - Voice (<10ms latency)   0x68,0xb8,0xc0-0xdf     26-27,46-47,48-55   Voice
+                              7 - Network Control         0xe0-0xff               56-63               Voice
+                            */
+                            
+							/*
+                            #ifndef BOARD_BRCM_WLAN
+                            uint8_t serviceType =  0xb8;//tcp,voice
+                            res = setsockopt(clientSocket, SOL_IP, IP_TOS, (void *)&serviceType, sizeof(serviceType));
+                            if(res < 0) {
+                                ALOGD("setsockopt(IP_TOS) failed!");
+                            } else {
+                                ALOGD("tcp set QoS.");
+                            }
+                            #endif
+							*/
+							
                             sp<Session> clientSession =
                                 new Session(
                                         mNextSessionID++,

@@ -32,6 +32,7 @@
 #include <media/AVSyncSettings.h>
 #include <media/Metadata.h>
 
+#include "mediaplayerinfo.h"
 // Fwd decl to make sure everyone agrees that the scope of struct sockaddr_in is
 // global, and not in android::
 struct sockaddr_in;
@@ -52,8 +53,19 @@ enum player_type {
     // The shared library with the test player is passed passed as an
     // argument to the 'test:' url in the setDataSource call.
     TEST_PLAYER = 5,
+    THUMBNAIL_PLAYER = 10,
+    AW_PLAYER = 11,
 };
 
+enum player_states {
+    PLAYER_STATE_UNKOWN = 0,
+    PLAYER_STATE_PREPARED,
+    PLAYER_STATE_PAUSE,
+    PLAYER_STATE_PLAYING,
+    PLAYER_STATE_SEEKING,
+    PLAYER_STATE_SUSPEND,
+    PLAYER_STATE_RESUME,
+};
 
 #define DEFAULT_AUDIOSINK_BUFFERCOUNT 4
 #define DEFAULT_AUDIOSINK_BUFFERSIZE 1200
@@ -67,7 +79,7 @@ enum player_type {
 
 // callback mechanism for passing messages to MediaPlayer object
 typedef void (*notify_callback_f)(void* cookie,
-        int msg, int ext1, int ext2, const Parcel *obj);
+        int msg, int ext1, int ext2, const Parcel *obj, Parcel *replyObj);
 
 // abstract base class - use MediaPlayerInterface
 class MediaPlayerBase : public RefBase
@@ -251,7 +263,7 @@ public:
     }
 
     void        sendEvent(int msg, int ext1=0, int ext2=0,
-                          const Parcel *obj=NULL) {
+                          const Parcel *obj=NULL, Parcel *replyObj=NULL) {
         notify_callback_f notifyCB;
         void* cookie;
         {
@@ -260,12 +272,97 @@ public:
             cookie = mCookie;
         }
 
-        if (notifyCB) notifyCB(cookie, msg, ext1, ext2, obj);
+        if (notifyCB) notifyCB(cookie, msg, ext1, ext2, obj, replyObj);
     }
 
     virtual status_t dump(int /* fd */, const Vector<String16>& /* args */) const {
         return INVALID_OPERATION;
     }
+    /* add by Gary. start {{----------------------------------- */
+    virtual int getMeidaPlayerState(){
+        return PLAYER_STATE_UNKOWN;
+    }
+	/* add by Gary. end   -----------------------------------}} */
+	
+	/* add by Gary. start {{----------------------------------- */
+    /* 2011-9-14 14:27:12 */
+    /* expend interfaces about subtitle, track and so on */
+    virtual status_t setSubGate(bool /* showSub */)
+    {
+        return OK;
+    }
+    
+    virtual bool getSubGate()
+    {
+        return true;
+    }
+
+    virtual status_t setSubCharset(const char*  /* charset */)
+    {
+        return OK;
+    }
+    
+    virtual status_t getSubCharset(char* /* charset */)
+    {
+        return OK;
+    }
+
+    virtual status_t setSubDelay(int /* time */)
+    {
+        return OK;
+    }
+    
+    virtual int getSubDelay()
+    {
+        return -1;
+    }
+	
+    /* add by Gary. end   -----------------------------------}} */
+
+	
+	virtual status_t getMediaPlayerInfo( struct MediaPlayerInfo* /* mediaPlayerInfo */)
+	{
+		return OK;
+	}
+
+    /* add by Gary. start {{----------------------------------- */
+    /* 2011-11-14 */
+    /* support scale mode */
+    virtual status_t enableScaleMode(bool /* enable */, int /* width */, int /* height */)
+    {
+        return -1;
+    }
+    /* add by Gary. end   -----------------------------------}} */
+    /* add by Gary. start {{----------------------------------- */
+    /* 2011-11-14 */
+	virtual status_t extensionControl(int /* command */, int /* para0 */, int /* para1 */)
+    {
+        return OK;
+    }
+	/* add by Gary. end   -----------------------------------}} */
+	
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-07 */
+    //* set audio channel mute 
+    virtual status_t setChannelMuteMode(int /* muteMode */)
+    {
+        return OK;
+    }
+    
+    virtual int getChannelMuteMode()
+    {
+        return -1;
+    }
+    /* add by Gary. end   -----------------------------------}} */
+    
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    //* add general interfaces for expansibility 
+    virtual status_t generalInterface(int /* cmd */, int /* int1 */, int /* int2 */, int /* int3 */, void* /* p */ )
+    {
+        return OK;
+    }
+    /* add by Gary. end   -----------------------------------}} */
 
 private:
     friend class MediaPlayerService;

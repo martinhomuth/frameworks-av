@@ -38,6 +38,7 @@ struct RTPSender : public RTPBase, public AHandler {
         kWhatError,
         kWhatNetworkStall,
         kWhatInformSender,
+        kWhatBitrateChange,
     };
     RTPSender(
             const sp<ANetworkSession> &netSession,

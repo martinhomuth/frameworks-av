@@ -359,6 +359,18 @@ void MediaSender::onSenderNotify(const sp<AMessage> &msg) {
             break;
         }
 
+        case kWhatBitrateChange:
+        {
+            int32_t encoderBitrate;
+            CHECK(msg->findInt32("encoderBitrate", &encoderBitrate));
+
+            sp<AMessage> notify = mNotify->dup();
+            notify->setInt32("what", kWhatBitrateChange);
+            notify->setInt32("encoderBitrate", encoderBitrate);
+            notify->post();
+            break;
+        }
+
         default:
             TRESPASS();
     }

@@ -20,6 +20,7 @@
 #include <binder/Parcel.h>
 
 #include <media/IMediaPlayerClient.h>
+#include <media/mediaplayer.h>
 
 namespace android {
 
@@ -35,7 +36,7 @@ public:
     {
     }
 
-    virtual void notify(int msg, int ext1, int ext2, const Parcel *obj)
+    virtual void notify(int msg, int ext1, int ext2, const Parcel *obj, Parcel *replyObj)
     {
         Parcel data, reply;
         data.writeInterfaceToken(IMediaPlayerClient::getInterfaceDescriptor());
@@ -45,7 +46,19 @@ public:
         if (obj && obj->dataSize() > 0) {
             data.appendFrom(const_cast<Parcel *>(obj), 0, obj->dataSize());
         }
-        remote()->transact(NOTIFY, data, &reply, IBinder::FLAG_ONEWAY);
+		if (replyObj!=NULL)
+        {
+            remote()->transact(NOTIFY, data, replyObj);
+            //ALOGD("(f:%s, l:%d) parcel pos[%d], dataSize[%d]", __FUNCTION__, __LINE__, reply.dataPosition(), reply.dataSize());
+            //if(reply.dataSize() > 0)
+            //{
+            //    replyObj->appendFrom(const_cast<Parcel *>(&reply), 0, reply.dataSize());
+            //}
+        }
+        else
+        {
+            remote()->transact(NOTIFY, data, &reply, IBinder::FLAG_ONEWAY);
+        }
     }
 };
 
@@ -67,7 +80,7 @@ status_t BnMediaPlayerClient::onTransact(
                 obj.appendFrom(const_cast<Parcel *>(&data), data.dataPosition(), data.dataAvail());
             }
 
-            notify(msg, ext1, ext2, &obj);
+            notify(msg, ext1, ext2, &obj, reply);
             return NO_ERROR;
         } break;
         default:

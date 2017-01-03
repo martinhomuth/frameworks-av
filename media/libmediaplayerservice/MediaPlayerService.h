@@ -271,6 +271,19 @@ public:
     virtual void                addBatteryData(uint32_t params);
     // API for the Battery app to pull the data of codecs usage
     virtual status_t            pullBatteryData(Parcel* reply);
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-12 */
+    /* add the global interfaces to control the subtitle gate  */
+    virtual status_t            setGlobalSubGate(bool showSub);
+    virtual bool                getGlobalSubGate();
+    /* add by Gary. end   -----------------------------------}} */
+	/* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    virtual status_t            generalGlobalInterface(int cmd, int int1, int int2, int int3, void *p);
+    /* add by Gary. end   -----------------------------------}} */
+	virtual  status_t		 getMediaPlayerList();
+    virtual  status_t		 getMediaPlayerInfo(int mediaPlayerId, struct MediaPlayerInfo* mediaPlayerInfo);
 private:
 
     class Client : public BnMediaPlayer {
@@ -307,6 +320,37 @@ private:
         virtual status_t        setRetransmitEndpoint(const struct sockaddr_in* endpoint);
         virtual status_t        getRetransmitEndpoint(struct sockaddr_in* endpoint);
         virtual status_t        setNextPlayer(const sp<IMediaPlayer>& player);
+        /* add by Gary. start {{----------------------------------- */
+        /* expend interfaces about subtitle, track and so on */
+        virtual status_t        setSubGate(bool showSub);
+        virtual bool            getSubGate();
+        virtual status_t        setSubCharset(const char *charset);
+        virtual status_t        getSubCharset(char *charset);
+        virtual status_t        setSubDelay(int time);
+        virtual int             getSubDelay();
+		/* add by Gary. end   -----------------------------------}} */
+
+        /* add by Gary. start {{----------------------------------- */
+        /* 2011-11-14 */
+        /* support scale mode */
+        virtual status_t        enableScaleMode(bool enable, int width, int height);
+        /* add by Gary. end   -----------------------------------}} */
+        /* add by Gary. start {{----------------------------------- */
+        /* 2012-03-07 */
+        /* set audio channel mute */
+        virtual status_t        setChannelMuteMode(int muteMode);
+        virtual int             getChannelMuteMode();
+        /* add by Gary. end   -----------------------------------}} */
+
+        /* add by Gary. start {{----------------------------------- */
+        /* 2012-4-24 */
+        /* add two general interfaces for expansibility */
+        virtual status_t        generalInterface(int cmd, int int1, int int2, int int3, void *p);
+        /* add by Gary. end   -----------------------------------}} */
+		/* add by aw. start   -----------------------------------}} */
+		virtual  status_t		getMediaPlayerInfo(struct MediaPlayerInfo* mediaPlayerInfo);
+        virtual status_t        setDataSource(const sp<IStreamSource> &source, int type);
+		/* add by aw. end   -----------------------------------}} */
 
         sp<MediaPlayerBase>     createPlayer(player_type playerType);
 
@@ -326,7 +370,7 @@ private:
                                                    status_t status);
 
         static  void            notify(void* cookie, int msg,
-                                       int ext1, int ext2, const Parcel *obj);
+                                       int ext1, int ext2, const Parcel *obj, Parcel *replyObj=NULL);
 
                 pid_t           pid() const { return mPid; }
         virtual status_t        dump(int fd, const Vector<String16>& args);
@@ -383,6 +427,32 @@ private:
                     bool                        mRetransmitEndpointValid;
                     sp<Client>                  mNextClient;
 
+                    /* add by Gary. start {{----------------------------------- */
+                    int                         mHasSurface;
+                    int 						mMsg; //add by lszhang for play during<1 song
+                    /* add by Gary. end   -----------------------------------}} */
+
+                    /* add by Gary. start {{----------------------------------- */
+                    /* 2011-9-28 16:28:24 */
+                    /* save properties before creating the real player */
+                    bool                        mSubGate;
+                    int                         mSubDelay;
+                    char                        mSubCharset[MEDIAPLAYER_NAME_LEN_MAX];
+                    int                         mMuteMode;   // 2012-03-07, set audio channel mute
+                    /* add by Gary. end   -----------------------------------}} */
+
+                    /* add by Gary. start {{----------------------------------- */
+                    /* 2011-11-14 */
+                    /* support scale mode */
+                    bool                        mEnableScaleMode;
+                    int                         mScaleWidth;
+                    int                         mScaleHeight;
+                    /* add by Gary. end   -----------------------------------}} */
+
+                    
+                    // aw extend. store BDFolderPlayMode. eric_wang. 20140307.
+                    int  mBDFolderPlayMode;  //true: BD folder play. false:normal play.
+                    // aw extend end. store BDFolderPlayMode. eric_wang. 20140307.
         // Metadata filters.
         media::Metadata::Filter mMetadataAllow;  // protected by mLock
         media::Metadata::Filter mMetadataDrop;  // protected by mLock
@@ -409,6 +479,19 @@ private:
                 int32_t                     mNextConnId;
                 sp<IOMX>                    mOMX;
                 sp<ICrypto>                 mCrypto;
+                /* add by Gary. start {{----------------------------------- */
+                /* 2011-11-14 */
+                /* support adjusting colors while playing video */
+                
+                bool                        mGlobalSubGate;  // 2012-03-12, add the global interfaces to control the subtitle gate
+                /* add by Gary. end   -----------------------------------}} */
+
+                /*Start by Bevis. Detect http data source from other application.*/
+                wp<Client> mDetectClient;
+                /*Start by Bevis. Detect http data source from other application.*/
+                /*Add by eric_wang. record hdmi state, 20130318 */
+                static int                  mHdmiPlugged;   //1:hdmi plugin, 0:hdmi plugout
+                /*Add by eric_wang. record hdmi state, 20130318, end ---------- */
 };
 
 // ----------------------------------------------------------------------------

@@ -81,7 +81,8 @@ enum {
     LIST_AUDIO_PATCHES,
     SET_AUDIO_PORT_CONFIG,
     GET_AUDIO_HW_SYNC,
-    SYSTEM_READY
+    SYSTEM_READY,
+	SET_STREAM_MUTE_NO_PERMISSION
 };
 
 #define MAX_ITEMS_PER_LIST 1024
@@ -910,6 +911,15 @@ public:
         data.writeInterfaceToken(IAudioFlinger::getInterfaceDescriptor());
         return remote()->transact(SYSTEM_READY, data, &reply, IBinder::FLAG_ONEWAY);
     }
+	virtual status_t setStreamMuteNoPermission(audio_stream_type_t stream, bool muted)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioFlinger::getInterfaceDescriptor());
+        data.writeInt32((int32_t) stream);
+        data.writeInt32(muted);
+        remote()->transact(SET_STREAM_MUTE_NO_PERMISSION, data, &reply);
+        return reply.readInt32();
+    }
 };
 
 IMPLEMENT_META_INTERFACE(AudioFlinger, "android.media.IAudioFlinger");
@@ -1416,6 +1426,12 @@ status_t BnAudioFlinger::onTransact(
         case SYSTEM_READY: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             systemReady();
+            return NO_ERROR;
+        } break;
+		case SET_STREAM_MUTE_NO_PERMISSION: {
+            CHECK_INTERFACE(IAudioFlinger, data, reply);
+            int stream = data.readInt32();
+            reply->writeInt32( setStreamMuteNoPermission((audio_stream_type_t) stream, data.readInt32()) );
             return NO_ERROR;
         } break;
         default:

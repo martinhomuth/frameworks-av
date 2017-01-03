@@ -152,6 +152,8 @@ public:
                                             audio_io_handle_t output);
     virtual     status_t    setStreamMute(audio_stream_type_t stream, bool muted);
 
+    virtual     status_t    setStreamMuteNoPermission(audio_stream_type_t stream, bool muted);
+
     virtual     float       streamVolume(audio_stream_type_t stream,
                                          audio_io_handle_t output) const;
     virtual     bool        streamMute(audio_stream_type_t stream) const;

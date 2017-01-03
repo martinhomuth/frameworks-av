@@ -68,6 +68,7 @@ struct CodecBase : public AHandler {
     virtual void signalSetParameters(const sp<AMessage> &msg) = 0;
     virtual void signalEndOfInputStream() = 0;
 
+	virtual status_t setEncoderBitrate(int32_t bitrate) = 0;
     struct PortDescription : public RefBase {
         virtual size_t countBuffers() = 0;
         virtual IOMX::buffer_id bufferIDAt(size_t index) const = 0;

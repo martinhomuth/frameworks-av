@@ -69,9 +69,11 @@ LOCAL_SRC_FILES:=                         \
         WVMExtractor.cpp                  \
         XINGSeeker.cpp                    \
         avc_utils.cpp                     \
+        HDMIListerner.cpp
 
 LOCAL_C_INCLUDES:= \
         $(TOP)/frameworks/av/include/media/ \
+	$(TOP)/frameworks/av/media/libstagefright/include	\
         $(TOP)/frameworks/av/include/media/stagefright/timedtext \
         $(TOP)/frameworks/native/include/media/hardware \
         $(TOP)/frameworks/native/include/media/openmax \

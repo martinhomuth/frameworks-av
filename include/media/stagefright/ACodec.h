@@ -58,6 +58,7 @@ struct ACodec : public AHierarchicalStateMachine, public CodecBase {
     virtual void signalSetParameters(const sp<AMessage> &msg);
     virtual void signalEndOfInputStream();
     virtual void signalRequestIDRFrame();
+    virtual status_t setEncoderBitrate(int32_t bitrate);
 
     // AHierarchicalStateMachine implements the message handling
     virtual void onMessageReceived(const sp<AMessage> &msg) {
@@ -143,6 +144,7 @@ private:
         kFlagIsSecure                                 = 1,
         kFlagPushBlankBuffersToNativeWindowOnShutdown = 2,
         kFlagIsGrallocUsageProtected                  = 4,
+		kFlagIsDRM									  = 0x10000,
     };
 
     enum {

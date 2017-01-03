@@ -72,6 +72,8 @@ struct Converter : public AHandler {
 
     static int32_t GetInt32Property(const char *propName, int32_t defaultValue);
 
+    status_t setEncoderBitrate(int32_t bitrate);
+
     enum {
         // MUST not conflict with private enums below.
         kWhatMediaPullerNotify = 'pulN',

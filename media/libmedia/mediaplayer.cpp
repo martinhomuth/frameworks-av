@@ -67,6 +67,10 @@ MediaPlayer::MediaPlayer()
     AudioSystem::acquireAudioSessionId(mAudioSessionId, -1);
     mSendLevel = 0;
     mRetransmitEndpointValid = false;
+
+	mAWExtendDirId = -1;
+	mAWExtendDp = NULL;
+	mBDFolderPlayMode = 0;
 }
 
 MediaPlayer::~MediaPlayer()
@@ -155,6 +159,11 @@ status_t MediaPlayer::setDataSource(
         const sp<IMediaPlayerService>& service(getMediaPlayerService());
         if (service != 0) {
             sp<IMediaPlayer> player(service->create(this, mAudioSessionId));
+			if(player != NULL)
+			{
+				ALOGD("(f:%s, l:%d) set BDFolderPlay[%d]", __FUNCTION__, __LINE__, mBDFolderPlayMode);
+				player->generalInterface(MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE, mBDFolderPlayMode, 0, 0, NULL);
+			}
             if ((NO_ERROR != doSetRetransmitEndpoint(player)) ||
                 (NO_ERROR != player->setDataSource(httpService, url, headers))) {
                 player.clear();
@@ -799,7 +808,7 @@ status_t MediaPlayer::setRetransmitEndpoint(const char* addrString,
     return OK;
 }
 
-void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
+void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj, Parcel *replyObj)
 {
     ALOGV("message received msg=%d, ext1=%d, ext2=%d", msg, ext1, ext2);
     bool send = true;
@@ -818,6 +827,193 @@ void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
         locked = true;
     }
 
+    //aw extend. Process AWEXTEND_MEDIA_INFO msg here. Don't notify JNIMediaPlayerListener. eric_wang. 20140303.
+    if (msg == AWEXTEND_MEDIA_INFO && ext1 == AWEXTEND_MEDIA_INFO_REQUEST_OPEN_FILE) 
+    {
+        ALOGV("notify(%d, %d, %d) callback on mediaplayer, mCurrentState[0x%x]", msg, ext1, ext2, mCurrentState);
+        int     nFileFd;
+        int     FilePathLen;
+        char    FilePath[4096];
+        obj->setDataPosition(0);
+        FilePathLen = obj->readInt32();
+        if(FilePathLen < 4096)
+        {
+            const char* strdata = (const char*)obj->readInplace(FilePathLen);
+            memcpy(FilePath, strdata, FilePathLen);
+            FilePath[FilePathLen] = 0;
+            //ALOGD("(f:%s, l:%d) FilePath[%s]", __FUNCTION__, __LINE__, FilePath);
+            nFileFd  = open(FilePath, O_RDONLY);
+            if(nFileFd >= 0)
+            {
+                //ALOGD("(f:%s, l:%d) open fd[%d] success, FilePath[%s]", __FUNCTION__, __LINE__, nFileFd, FilePath);
+                replyObj->writeInt32(true);
+                replyObj->writeDupFileDescriptor(nFileFd);
+                close(nFileFd);
+            }
+            else
+            {
+                //ALOGW("(f:%s, l:%d) open fd[%d] fail, FilePath[%s]", __FUNCTION__, __LINE__, nFileFd, FilePath);
+                replyObj->writeInt32(false);
+            }
+        }
+        else
+        {
+            ALOGW("fatal error! FilePathLen[%d] >= maxLen[4096]", FilePathLen);
+            replyObj->writeInt32(false);
+        }
+
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+    }
+    else if(msg == AWEXTEND_MEDIA_INFO && ext1 == AWEXTEND_MEDIA_INFO_REQUEST_OPEN_DIR)
+    {
+        ALOGV("notify(%d, %d, %d) callback on mediaplayer, mCurrentState[0x%x]", msg, ext1, ext2, mCurrentState);
+
+        int     nDirPathLen;
+        char    DirPath[4096];
+        if(mAWExtendDirId >= 0)
+        {
+            ALOGD("(f:%s, l:%d) fatal error! already open one directory[%d], nested open is not support now!", __FUNCTION__, __LINE__, mAWExtendDirId);
+            replyObj->writeInt32(-1);
+            goto __end_open_dir;
+        }
+        obj->setDataPosition(0);
+        nDirPathLen = obj->readInt32();
+        if(nDirPathLen < 4096)
+        {
+            const char* strdata = (const char*)obj->readInplace(nDirPathLen);
+            memcpy(DirPath, strdata, nDirPathLen);
+            DirPath[nDirPathLen] = 0;
+            ALOGD("(f:%s, l:%d) AWEXTEND_MEDIA_INFO_REQUEST_OPEN_DIR, DirPath[%s]", __FUNCTION__, __LINE__, DirPath);
+            mAWExtendDp = opendir((char*)DirPath);
+            if (mAWExtendDp)
+            {
+                mAWExtendDirId = 0;
+                replyObj->writeInt32(mAWExtendDirId);
+            }
+            else
+            {
+                ALOGW("(f:%s, l:%d) open directory[%s] error\n", __FUNCTION__, __LINE__, DirPath);
+                replyObj->writeInt32(-1);
+            }
+        }
+        else
+        {
+            ALOGW("fatal error! nDirPathLen[%d] >= maxLen[4096]", nDirPathLen);
+            replyObj->writeInt32(-1);
+        }
+        
+__end_open_dir:
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+    }
+    else if(msg == AWEXTEND_MEDIA_INFO && ext1 == AWEXTEND_MEDIA_INFO_REQUEST_READ_DIR)
+    {
+        ALOGV("notify(%d, %d, %d) callback on mediaplayer, mCurrentState[0x%x]", msg, ext1, ext2, mCurrentState);
+        int     nDirId;
+        struct dirent *filename;
+        int     nFileNameLen;
+        obj->setDataPosition(0);
+        nDirId = obj->readInt32();
+        if(nDirId==mAWExtendDirId && nDirId>=0)
+        {
+            if(mAWExtendDp)
+            {
+                filename=readdir(mAWExtendDp);
+                if(filename!=NULL)
+                {
+                    nFileNameLen = strlen(filename->d_name);
+                    if(nFileNameLen > 0)
+                    {
+                        replyObj->writeInt32(0);
+                        replyObj->writeInt32(nFileNameLen);
+                        replyObj->write(filename->d_name, nFileNameLen);
+                    }
+                    else
+                    {
+                        ALOGW("(f:%s, l:%d) fatal error! why filename is empty string?", __FUNCTION__, __LINE__);
+                        replyObj->writeInt32(-1);
+                    }
+                }
+                else
+                {
+                    ALOGD("(f:%s, l:%d) nDirId[%d] has read over!", __FUNCTION__, __LINE__, nDirId);
+                    replyObj->writeInt32(-1);
+                }
+            }
+            else
+            {
+                ALOGW("(f:%s, l:%d) fatal error! nDirId[%d] is match, but mAWExtendDp==NULL", __FUNCTION__, __LINE__, nDirId);
+                replyObj->writeInt32(-1);
+            }
+        }
+        else
+        {
+            ALOGW("(f:%s, l:%d) fatal error! nDirId[%d] is not match mAWExtendDirId[%d]", __FUNCTION__, __LINE__, nDirId, mAWExtendDirId);
+            replyObj->writeInt32(-1);
+        }
+
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+    }
+    else if(msg == AWEXTEND_MEDIA_INFO && ext1 == AWEXTEND_MEDIA_INFO_REQUEST_CLOSE_DIR)
+    {
+        ALOGV("notify(%d, %d, %d) callback on mediaplayer, mCurrentState[0x%x]", msg, ext1, ext2, mCurrentState);
+        int     nDirId;
+        obj->setDataPosition(0);
+        nDirId = obj->readInt32();
+        if(nDirId==mAWExtendDirId && nDirId>=0)
+        {
+            if(mAWExtendDp)
+            {
+                closedir(mAWExtendDp);
+                mAWExtendDp = NULL;
+                replyObj->writeInt32(0);
+            }
+            else
+            {
+                ALOGW("(f:%s, l:%d) fatal error! nDirId[%d] is match, but mAWExtendDp==NULL", __FUNCTION__, __LINE__, nDirId);
+                replyObj->writeInt32(-1);
+            }
+        }
+        else
+        {
+            ALOGW("(f:%s, l:%d) fatal error! nDirId[%d] is not match mAWExtendDirId[%d]", __FUNCTION__, __LINE__, nDirId, mAWExtendDirId);
+            replyObj->writeInt32(-1);
+        }
+
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+    }
+	else if(msg == AWEXTEND_MEDIA_INFO && ext1 == AWEXTEND_MEDIA_INFO_CHECK_ACCESS_RIGHRS)
+	{
+        ALOGV("notify(%d, %d, %d) callback on mediaplayer, mCurrentState[0x%x]", msg, ext1, ext2, mCurrentState);
+        int     isAccessable = -1;
+        int     FilePathLen;
+        char    FilePath[4096];
+		int 	mode;
+        obj->setDataPosition(0);
+        FilePathLen = obj->readInt32();
+        if(FilePathLen < 4096)
+        {
+            const char* strdata = (const char*)obj->readInplace(FilePathLen);
+            memcpy(FilePath, strdata, FilePathLen);
+            FilePath[FilePathLen] = 0;
+            //ALOGD("(f:%s, l:%d) FilePath[%s]", __FUNCTION__, __LINE__, FilePath);
+			mode = obj->readInt32();
+            isAccessable = access((const char *)FilePath, mode);
+        }
+        else
+        {
+            ALOGW("(f:%s, l:%d) fatal error! FilePathLen[%d] >=4096", __FUNCTION__, __LINE__, FilePathLen);
+        }
+		replyObj->writeInt32(isAccessable);
+
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+	}
+    //aw extend end. Process AWEXTEND_MEDIA_INFO msg here. Don't notify JNIMediaPlayerListener. eric_wang. 20140303.
+    
     // Allows calls from JNI in idle state to notify errors
     if (!(msg == MEDIA_ERROR && mCurrentState == MEDIA_PLAYER_IDLE) && mPlayer == 0) {
         ALOGV("notify(%d, %d, %d) callback on disconnected mediaplayer", msg, ext1, ext2);
@@ -935,4 +1131,166 @@ status_t MediaPlayer::setNextMediaPlayer(const sp<MediaPlayer>& next) {
     return mPlayer->setNextPlayer(next == NULL ? NULL : next->mPlayer);
 }
 
+status_t MediaPlayer::getMediaPlayerList()
+{
+    ALOGV("getMediaPlayerList");
+	
+	const sp<IMediaPlayerService>& service(getMediaPlayerService());
+    if (service != 0) {
+        return service->getMediaPlayerList();
+
+    }else {
+        return BAD_VALUE;
+    }
+}
+
+status_t MediaPlayer::getMediaPlayerInfo(int mediaPlayerId, struct MediaPlayerInfo* mediaPlayerInfo)
+{
+    ALOGV("getMediaPlayerInfo");
+	
+	const sp<IMediaPlayerService>& service(getMediaPlayerService());
+    if (service != 0) {
+        return service->getMediaPlayerInfo(mediaPlayerId, mediaPlayerInfo);
+
+    }else {
+        return BAD_VALUE;
+    }
+}
+
+/* add by Gary. start {{----------------------------------- */
+/* 2012-03-07 */
+/* set audio channel mute */
+status_t MediaPlayer::setChannelMuteMode(int muteMode)
+{
+    Mutex::Autolock lock(mLock);
+    mMuteMode = muteMode;
+    if (mPlayer == NULL) {
+        return OK;
+    }
+    return mPlayer->setChannelMuteMode(muteMode);
+}
+
+
+int MediaPlayer::getChannelMuteMode()
+{
+    Mutex::Autolock lock(mLock);
+    if (mPlayer == NULL) {
+        return 0xFFFFFFFF;
+    }
+    return mPlayer->getChannelMuteMode();
+}
+/* add by Gary. end   -----------------------------------}} */
+
+status_t MediaPlayer::setSubDelay(int time)
+{
+    Mutex::Autolock lock(mLock);
+    mSubDelay = time;
+    if (mPlayer == NULL) {
+        return OK;
+    }
+    return mPlayer->setSubDelay(time);
+}
+
+
+int MediaPlayer::getSubDelay()
+{
+    Mutex::Autolock lock(mLock);
+    if (mPlayer == NULL) {
+        return -1;
+    }
+    return mPlayer->getSubDelay();
+}
+
+
+status_t MediaPlayer::setSubCharset(const char *charset)
+{
+    Mutex::Autolock lock(mLock);
+    strcpy(mSubCharset, charset);
+    if (mPlayer == NULL) {
+        return OK;
+    }
+    return mPlayer->setSubCharset(charset);
+}
+
+
+status_t MediaPlayer::getSubCharset(char *charset)
+{
+    Mutex::Autolock lock(mLock);
+    if (mPlayer == NULL) {
+        return NO_INIT;
+    }
+    return mPlayer->getSubCharset(charset);
+}
+
+/* add by Gary. start {{----------------------------------- */
+/* 2011-11-14 */
+/* support scale mode */
+status_t MediaPlayer::enableScaleMode(bool enable, int width, int height)
+{
+    Mutex::Autolock lock(mLock);
+    if (mPlayer == NULL) {
+        return NO_INIT;
+    }
+    return mPlayer->enableScaleMode(enable, width, height);
+}
+
+/* add by Gary. end   -----------------------------------}} */
+/* add by Gary. start {{----------------------------------- */
+/* 2012-03-12 */
+/* add the global interfaces to control the subtitle gate  */
+
+bool MediaPlayer::getGlobalSubGate()
+{
+    const sp<IMediaPlayerService>& service(getMediaPlayerService());
+    if (service != 0) {
+        return service->getGlobalSubGate();
+    }else {
+        return -1;
+    }
+}
+
+status_t MediaPlayer::setGlobalSubGate(bool showSub)
+{
+    const sp<IMediaPlayerService>& service(getMediaPlayerService());
+    if (service != 0) {
+        return service->setGlobalSubGate(showSub);
+    }else {
+        return BAD_VALUE;
+    }
+}
+/* add by Gary. end   -----------------------------------}} */
+
+/* add by Gary. start {{----------------------------------- */
+/* 2012-4-24 */
+/* add two general interfaces for expansibility */
+status_t MediaPlayer::generalInterface(int cmd, int int1, int int2, int int3, void *p)
+{
+    Mutex::Autolock lock(mLock);
+	if(cmd==MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE)
+	{
+	    mBDFolderPlayMode = int1;
+        return OK;
+    }
+    else if(cmd==MEDIAPLAYER_CMD_GET_BD_FOLDER_PLAY_MODE)
+    {
+        *((int*)p) = mBDFolderPlayMode;
+		return OK;
+    }
+    if (mPlayer == NULL) {
+        return NO_INIT;
+    }
+    return mPlayer->generalInterface(cmd, int1, int2, int3, p);
+}
+
+status_t MediaPlayer::generalGlobalInterface(int cmd, int int1, int int2, int int3, void *p)
+{
+    const sp<IMediaPlayerService>& service(getMediaPlayerService());
+    if (service != 0) {
+        return service->generalGlobalInterface(cmd, int1, int2, int3, p);
+    }else {
+        return NO_INIT;
+    }
+}
+
+/* add by Gary. end   -----------------------------------}} */
 } // namespace android

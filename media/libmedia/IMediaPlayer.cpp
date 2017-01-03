@@ -32,6 +32,8 @@
 #include <gui/IGraphicBufferProducer.h>
 #include <utils/String8.h>
 
+
+
 namespace android {
 
 enum {
@@ -67,6 +69,33 @@ enum {
     SET_RETRANSMIT_ENDPOINT,
     GET_RETRANSMIT_ENDPOINT,
     SET_NEXT_PLAYER,
+	/* add by Gary. start {{----------------------------------- */
+    /* 2011-9-15 10:51:10 */
+    /* expend interfaces about subtitle, track and so on */
+    SET_SUB_CHARSET,
+    GET_SUB_CHARSET,
+    SET_SUB_DELAY,
+    GET_SUB_DELAY,
+    /* add by Gary. end   -----------------------------------}} */
+    
+    /* add by Gary. start {{----------------------------------- */
+    /* 2011-11-14 */
+    /* support scale mode */
+    ENABLE_SCALE_MODE,
+    /* add by Gary. end   -----------------------------------}} */
+
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-07 */
+    /* set audio channel mute */
+    SET_CHANNEL_MUTE_MODE,
+    GET_CHANNEL_MUTE_MODE,
+    /* add by Gary. end   -----------------------------------}} */
+
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    GENERAL_INTERFACE,
+    /* add by Gary. end   -----------------------------------}} */
 };
 
 class BpMediaPlayer: public BpInterface<IMediaPlayer>
@@ -419,6 +448,110 @@ public:
 
         return err;
     }
+	
+    status_t setSubCharset(const char *charset)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        data.writeCString(charset);
+        remote()->transact(SET_SUB_CHARSET, data, &reply);
+        return reply.readInt32();
+    }
+    
+    status_t getSubCharset(char *charset)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        remote()->transact(GET_SUB_CHARSET, data, &reply);
+        status_t ret = reply.readInt32();
+        if(ret == OK)
+            strcpy(charset, reply.readCString());
+        return ret;
+    }
+    status_t setSubDelay(int time)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        data.writeInt32(time);
+        remote()->transact(SET_SUB_DELAY, data, &reply);
+        return reply.readInt32();
+    }
+    
+    int getSubDelay()
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        remote()->transact(GET_SUB_DELAY, data, &reply);
+        return reply.readInt32();
+    }
+    /* add by Gary. start {{----------------------------------- */
+    /* 2011-11-14 */
+    /* support scale mode */
+    status_t enableScaleMode(bool enable, int width, int height)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        data.writeInt32(enable);
+        data.writeInt32(width);
+        data.writeInt32(height);
+        remote()->transact(ENABLE_SCALE_MODE, data, &reply);
+        return reply.readInt32();
+    }
+    /* add by Gary. end   -----------------------------------}} */    
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-07 */
+    /* set audio channel mute */
+    status_t setChannelMuteMode(int muteMode)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        data.writeInt32(muteMode);
+        remote()->transact(SET_CHANNEL_MUTE_MODE, data, &reply);
+        return reply.readInt32();
+    }
+    
+    int getChannelMuteMode()
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        remote()->transact(GET_CHANNEL_MUTE_MODE, data, &reply);
+        return reply.readInt32();
+    }
+    /* add by Gary. end   -----------------------------------}} */
+    
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    status_t generalInterface(int cmd, int int1, int /* int2 */ , int /* int3 */ , void *p)
+    {
+        Parcel data, reply;
+        status_t ret;
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        
+        data.writeInt32(cmd);                               // the first input value MUST be always the command.
+        switch(cmd){
+            case MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE:
+            case MEDIAPLAYER_CMD_SET_PRESENTANTION_SCREEN:{
+                data.writeInt32(int1);
+                remote()->transact(GENERAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+            }break;
+            case MEDIAPLAYER_CMD_GET_BD_FOLDER_PLAY_MODE:
+            case MEDIAPLAYER_CMD_GET_PRESENTANTION_SCREEN:{
+                remote()->transact(GENERAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+                *((int *)p) = reply.readInt32();
+            }break;
+            case MEDIAPLAYER_CMD_RELEASE_SURFACE_BYHAND:{
+                remote()->transact(GENERAL_INTERFACE, data, &reply);
+                ret = reply.readInt32();
+            }break;
+            default:
+                return BAD_VALUE;
+        }
+        return ret;
+    }
+    /* add by Gary. end   -----------------------------------}} */
 };
 
 IMPLEMENT_META_INTERFACE(MediaPlayer, "android.media.IMediaPlayer");
@@ -682,6 +815,96 @@ status_t BnMediaPlayer::onTransact(
 
             return NO_ERROR;
         } break;
+        case SET_SUB_CHARSET: {    
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(setSubCharset(data.readCString()));
+            return NO_ERROR;
+        } break;
+        case GET_SUB_CHARSET: {    
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            char *charset = new char[MEDIAPLAYER_NAME_LEN_MAX];
+            status_t ret = getSubCharset(charset);
+            reply->writeInt32(ret);
+            if(ret == OK)
+                reply->writeCString(charset);
+            delete[] charset;
+            return NO_ERROR;
+        } break;
+        case SET_SUB_DELAY: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(setSubDelay(data.readInt32()));
+            return NO_ERROR;
+        } break;
+        case GET_SUB_DELAY: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(getSubDelay());
+            return NO_ERROR;
+        } break;
+        /* add by Gary. start {{----------------------------------- */
+        /* 2011-11-14 */
+        /* support scale mode */
+        case ENABLE_SCALE_MODE: { 
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            int type = data.readInt32();
+            int width = data.readInt32();
+            int height = data.readInt32();
+            reply->writeInt32(enableScaleMode(type, width, height));
+            return NO_ERROR;
+        } break;
+        /* add by Gary. end   -----------------------------------}} */
+
+        /* add by Gary. start {{----------------------------------- */
+        /* 2012-03-07 */
+        /* set audio channel mute */
+        case SET_CHANNEL_MUTE_MODE: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(setChannelMuteMode(data.readInt32()));
+            return NO_ERROR;
+        } break;
+        case GET_CHANNEL_MUTE_MODE: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            reply->writeInt32(getChannelMuteMode());
+            return NO_ERROR;
+        } break;
+        /* add by Gary. end   -----------------------------------}} */
+        /* add by Gary. start {{----------------------------------- */
+        /* 2012-4-24 */
+        /* add two general interfaces for expansibility */
+        case GENERAL_INTERFACE: {      
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+            int cmd;
+            int int1 = 0;
+            int int2 = 0;
+            int int3 = 0;
+            void *p  = NULL;
+            status_t ret;
+            
+            cmd = data.readInt32();
+            switch(cmd){
+                case MEDIAPLAYER_CMD_SET_BD_FOLDER_PLAY_MODE:
+		case MEDIAPLAYER_CMD_SET_PRESENTANTION_SCREEN:{
+                    int1 = data.readInt32();
+                    ret = generalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+                }break;
+                case MEDIAPLAYER_CMD_GET_BD_FOLDER_PLAY_MODE:
+		case MEDIAPLAYER_CMD_GET_PRESENTANTION_SCREEN:{
+                    int play_mode;
+                    p = &play_mode;
+                    ret = generalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+                    reply->writeInt32(play_mode);
+                }break;
+		case MEDIAPLAYER_CMD_RELEASE_SURFACE_BYHAND:{
+                    ret = generalInterface(cmd, int1, int2, int3, p);
+                    reply->writeInt32(ret);
+                }break;
+                default:
+                    return BAD_VALUE;
+            }
+            return NO_ERROR;
+        } break;
+        /* add by Gary. end   -----------------------------------}} */
         default:
             return BBinder::onTransact(code, data, reply, flags);
     }

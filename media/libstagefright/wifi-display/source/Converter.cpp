@@ -817,4 +817,10 @@ void Converter::setVideoBitrate(int32_t bitRate) {
     }
 }
 
+status_t Converter::setEncoderBitrate(int32_t bitrate) {
+    if(mEncoder == NULL)
+        return NO_INIT;
+    return mEncoder->setEncoderBitrate(bitrate);
+}
+
 }  // namespace android

@@ -34,11 +34,204 @@
 #include "StagefrightPlayer.h"
 #include "nuplayer/NuPlayerDriver.h"
 
+
+#include "tplayer.h"
+#include "awplayer.h"
+#include <binder/IPCThreadState.h>
+#include <fcntl.h>
+#include <libsonivox/eas.h>
+#include "media/MidiIoWrapper.h"
+#include "SimpleMediaFormatProbe.h"
+
 namespace android {
+
+#define MAKE_AW_PLAYER_VALID (1)
 
 Mutex MediaPlayerFactory::sLock;
 MediaPlayerFactory::tFactoryMap MediaPlayerFactory::sFactoryMap;
 bool MediaPlayerFactory::sInitComplete = false;
+
+// TODO: Temp hack until we can register players
+typedef struct {
+    const char *extension;
+    const player_type playertype;
+} extmap;
+
+extmap FILE_EXTS [] =  {
+		{".ogg",  NU_PLAYER},
+		{".mp3",  NU_PLAYER},
+		{".wav",  NU_PLAYER},
+		{".amr",  NU_PLAYER},
+		{".flac", NU_PLAYER},
+		{".m4a",  NU_PLAYER},
+		{".m4r",  NU_PLAYER},
+		{".out",  AW_PLAYER},
+		//{".3gp",  STAGEFRIGHT_PLAYER},
+        //{".aac",  STAGEFRIGHT_PLAYER},
+            
+        {".mid",  NU_PLAYER},
+        {".midi", NU_PLAYER},
+        {".smf",  NU_PLAYER},
+        {".xmf",  NU_PLAYER},
+        {".mxmf", NU_PLAYER},
+        {".imy",  NU_PLAYER},
+        {".rtttl",NU_PLAYER},
+        {".rtx",  NU_PLAYER},
+        {".ota",  NU_PLAYER},
+            
+        {".ape", AW_PLAYER},
+        {".ac3", AW_PLAYER},
+        {".dts", AW_PLAYER},
+        {".wma", AW_PLAYER},
+        {".aac", AW_PLAYER},
+        {".mp2", AW_PLAYER},
+        {".mp1", AW_PLAYER},
+        {".athumb", THUMBNAIL_PLAYER},
+};
+
+#define GET_CALLING_PID	(IPCThreadState::self()->getCallingPid())
+void getCallingProcessName(char *name)
+{
+	char proc_node[128];
+
+	if (name == 0)
+	{
+		loge("error in params");
+		return;
+	}
+
+	memset(proc_node, 0, sizeof(proc_node));
+	sprintf(proc_node, "/proc/%d/cmdline", GET_CALLING_PID);
+	int fp = ::open(proc_node, O_RDONLY);
+	if (fp > 0)
+	{
+		memset(name, 0, 128);
+		::read(fp, name, 128);
+		::close(fp);
+		fp = 0;
+		logd("Calling process is: %s", name);
+	}
+	else
+	{
+		loge("Obtain calling process failed");
+	}
+}
+
+player_type getPlayerType_l(int fd, int64_t offset, int64_t length)
+{
+	int r_size;
+    char buf[4096];
+	int file_format;
+	char  mCallingProcess[256]={0};
+    lseek(fd, offset, SEEK_SET);
+    r_size = read(fd, buf, sizeof(buf));
+    lseek(fd, offset, SEEK_SET);
+
+    long ident = *((long*)buf);
+
+    // Ogg vorbis?
+    if (ident == 0x5367674f) {
+    	// 'OggS'
+    	return NU_PLAYER;
+    } else if(ident == 0x6d756874) {
+    	return THUMBNAIL_PLAYER;
+    }
+
+    // Some kind of MIDI?
+    EAS_DATA_HANDLE easdata;
+    if (EAS_Init(&easdata) == EAS_SUCCESS) {
+		sp<MidiIoWrapper> mIoWrapper = new MidiIoWrapper(fd,offset,length);
+        EAS_HANDLE  eashandle;
+        if (EAS_OpenFile(easdata, mIoWrapper->getLocator(), &eashandle) == EAS_SUCCESS) {
+            EAS_CloseFile(easdata, eashandle);
+            EAS_Shutdown(easdata);
+			mIoWrapper.clear();
+            return NU_PLAYER;
+        }
+		mIoWrapper.clear();
+        EAS_Shutdown(easdata);
+    }
+
+	getCallingProcessName(mCallingProcess);
+	if((strcmp(mCallingProcess, "com.android.cts.media") == 0) || (strcmp(mCallingProcess, "android.process.media") == 0) || (strcmp(mCallingProcess, "com.android.cts.security") == 0))
+	{
+			file_format = audio_format_detect((unsigned char*)buf, r_size, fd, offset);
+
+			if (file_format == MEDIA_FORMAT_MP3 || file_format == MEDIA_FORMAT_3GP || file_format == MEDIA_FORMAT_M4A)
+			{
+				return NU_PLAYER;
+			}
+	}
+
+//	if (true) {
+//	    file_format = audio_format_detect((unsigned char*)buf, r_size, fd, offset);
+//
+//	    if (file_format == MEDIA_FORMAT_MP3 )
+//	    {
+//		    return STAGEFRIGHT_PLAYER;
+//	    }
+//	}
+
+    return AW_PLAYER;
+}
+
+player_type getPlayerType_l(const char* url)
+{
+	char *strpos;
+	char  mCallingProcess[256]={0};
+
+    if (TestPlayerStub::canBeUsed(url)) {
+            return TEST_PLAYER;
+        }
+
+    if (!strncasecmp("http://", url, 7) || !strncasecmp("https://", url, 8)) {
+		getCallingProcessName(mCallingProcess);
+		if((strpos = strrchr(url,'.')) != NULL){
+			if ((strcmp(mCallingProcess, "com.android.cts.media") == 0) && !strncasecmp(strpos, ".m3u8", 5)){
+				return NU_PLAYER;
+			}
+		}
+
+		if((strcmp(mCallingProcess, "android.netsecpolicy.usescleartext.false.cts") == 0))
+			return NU_PLAYER;
+
+		if((strpos = strrchr(url,'?')) != NULL) {
+			for (int i = 0; i < NELEM(FILE_EXTS); ++i) {
+					int len = strlen(FILE_EXTS[i].extension);
+						if (!strncasecmp(strpos -len, FILE_EXTS[i].extension, len)) {
+                            if(i==2)//net wav
+							{
+								return AW_PLAYER;
+							}
+							else
+							{
+								return FILE_EXTS[i].playertype;
+							}
+						}
+				}
+		}
+	}
+
+	if (!strncmp("data:;base64", url, strlen("data:;base64"))){
+		return NU_PLAYER;
+	}
+
+    // use MidiFile for MIDI extensions
+    int lenURL = strlen(url);
+    int len;
+    int start;
+    for (int i = 0; i < NELEM(FILE_EXTS); ++i) {
+        len = strlen(FILE_EXTS[i].extension);
+        start = lenURL - len;
+        if (start > 0) {
+            if (!strncasecmp(url + start, FILE_EXTS[i].extension, len)) {
+                return FILE_EXTS[i].playertype;
+            }
+        }
+    }
+    
+    return AW_PLAYER;
+}
 
 status_t MediaPlayerFactory::registerFactory_l(IFactory* factory,
                                                player_type type) {
@@ -110,14 +303,23 @@ void MediaPlayerFactory::unregisterFactory(player_type type) {
 
 player_type MediaPlayerFactory::getPlayerType(const sp<IMediaPlayer>& client,
                                               const char* url) {
+#if(MAKE_AW_PLAYER_VALID)
+	return android::getPlayerType_l(url);
+#else
     GET_PLAYER_TYPE_IMPL(client, url);
+#endif
+
 }
 
 player_type MediaPlayerFactory::getPlayerType(const sp<IMediaPlayer>& client,
                                               int fd,
                                               int64_t offset,
                                               int64_t length) {
+#if(MAKE_AW_PLAYER_VALID)
+	return android::getPlayerType_l(fd,offset,length);
+#else
     GET_PLAYER_TYPE_IMPL(client, fd, offset, length);
+#endif
 }
 
 player_type MediaPlayerFactory::getPlayerType(const sp<IMediaPlayer>& client,
@@ -304,15 +506,52 @@ class TestPlayerFactory : public MediaPlayerFactory::IFactory {
     }
 };
 
+class TPlayerFactory : public MediaPlayerFactory::IFactory {
+  public:
+    virtual float scoreFactory(const sp<IMediaPlayer>& /*client*/,
+                               int /*fd*/,
+                               int64_t /*offset*/,
+                               int64_t /*length*/,
+                               float /*curScore*/) {
+
+        return 0.0;
+    }
+
+    virtual sp<MediaPlayerBase> createPlayer(pid_t /* pid */) {
+        ALOGV(" create TPlayer");
+        return new TPlayer();
+    }
+};
+
+class AwPlayerFactory : public MediaPlayerFactory::IFactory {
+  public:
+    virtual float scoreFactory(const sp<IMediaPlayer>& /*client*/,
+                               int /*fd*/,
+                               int64_t /*offset*/,
+                               int64_t /*length*/,
+                               float /*curScore*/) {
+
+        return 0.0;
+    }
+
+    virtual sp<MediaPlayerBase> createPlayer(pid_t /* pid */) {
+        ALOGV(" create AwPlayer");
+        return new AwPlayer();
+    }
+};
+
 void MediaPlayerFactory::registerBuiltinFactories() {
     Mutex::Autolock lock_(&sLock);
 
     if (sInitComplete)
         return;
 
+
     registerFactory_l(new StagefrightPlayerFactory(), STAGEFRIGHT_PLAYER);
     registerFactory_l(new NuPlayerFactory(), NU_PLAYER);
     registerFactory_l(new TestPlayerFactory(), TEST_PLAYER);
+	registerFactory_l(new AwPlayerFactory(), AW_PLAYER);
+    registerFactory_l(new TPlayerFactory(), THUMBNAIL_PLAYER);
 
     sInitComplete = true;
 }

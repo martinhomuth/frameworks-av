@@ -88,6 +88,7 @@ struct ANetworkSession : public RefBase {
         kWhatBinaryData,
         kWhatWebSocketMessage,
         kWhatNetworkStall,
+        kWhatBitrateChange,
     };
 
 protected:

@@ -29,6 +29,8 @@
 
 #include <utils/KeyedVector.h>
 #include <utils/String8.h>
+#include "mediaplayerinfo.h"
+#include <dirent.h>
 
 class ANativeWindow;
 
@@ -37,6 +39,9 @@ namespace android {
 struct AVSyncSettings;
 class IGraphicBufferProducer;
 class Surface;
+
+//* for Dlna source detector
+#define DLNA_SOURCE_DETECTOR "com.softwinner.dlnasourcedetector"
 
 enum media_event_type {
     MEDIA_NOP               = 0, // interface test message
@@ -54,6 +59,8 @@ enum media_event_type {
     MEDIA_INFO              = 200,
     MEDIA_SUBTITLE_DATA     = 201,
     MEDIA_META_DATA         = 202,
+	MEDIA_SOURCE_DETECTED	= 234,		//* for Dlna source detector    
+	AWEXTEND_MEDIA_INFO     = 1000,
 };
 
 // Generic error codes for the media player framework.  Errors are fatal, the
@@ -83,6 +90,9 @@ enum media_error_type {
     // 2xx
     MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK = 200,
     // 3xx
+    // 9xx
+    MEDIA_ERROR_OUT_OF_MEMORY = 900,
+    MEDIA_ERROR_IO = -1004,
 };
 
 
@@ -134,8 +144,21 @@ enum media_info_type {
 
     //9xx
     MEDIA_INFO_TIMED_TEXT_ERROR = 900,
+
+    //4096, aw extend. 
+    MEDIA_INFO_AWEXTEND_INDICATE_3D_DOUBLE_STREAM = 4096,
 };
 
+enum AWExtend_media_info_type {
+    // 0xx
+    AWEXTEND_MEDIA_INFO_UNKNOWN = 1,
+    //player need open file.
+    AWEXTEND_MEDIA_INFO_REQUEST_OPEN_FILE   = 2,
+    AWEXTEND_MEDIA_INFO_REQUEST_OPEN_DIR    = 3,
+    AWEXTEND_MEDIA_INFO_REQUEST_READ_DIR    = 4,
+    AWEXTEND_MEDIA_INFO_REQUEST_CLOSE_DIR   = 5,
+    AWEXTEND_MEDIA_INFO_CHECK_ACCESS_RIGHRS = 6,
+};
 
 
 enum media_player_states {
@@ -177,7 +200,10 @@ enum media_player_invoke_ids {
     INVOKE_ID_SELECT_TRACK = 4,
     INVOKE_ID_UNSELECT_TRACK = 5,
     INVOKE_ID_SET_VIDEO_SCALING_MODE = 6,
-    INVOKE_ID_GET_SELECTED_TRACK = 7
+    INVOKE_ID_GET_SELECTED_TRACK = 7,
+
+    INVOKE_ID_SET_3D_MODE = 128,
+    INVOKE_ID_GET_3D_MODE = 129,
 };
 
 // Keep MEDIA_TRACK_TYPE_* in sync with MediaPlayer.java.
@@ -243,7 +269,7 @@ public:
             status_t        setLooping(int loop);
             bool            isLooping();
             status_t        setVolume(float leftVolume, float rightVolume);
-            void            notify(int msg, int ext1, int ext2, const Parcel *obj = NULL);
+            void            notify(int msg, int ext1, int ext2, const Parcel *obj = NULL, Parcel *replyObj=NULL);
             status_t        invoke(const Parcel& request, Parcel *reply);
             status_t        setMetadataFilter(const Parcel& filter);
             status_t        getMetadata(bool update_only, bool apply_filter, Parcel *metadata);
@@ -256,6 +282,38 @@ public:
             status_t        setRetransmitEndpoint(const char* addrString, uint16_t port);
             status_t        setNextMediaPlayer(const sp<MediaPlayer>& player);
 
+	   /* add by Gary. start {{----------------------------------- */
+            //* expend interfaces about subtitle
+            status_t        setSubCharset(const char *charset);
+            status_t        getSubCharset(char *charset);
+            status_t        setSubDelay(int time);
+            int             getSubDelay();
+            /* add by Gary. end   -----------------------------------}} */
+            /* add by Gary. start {{----------------------------------- */
+            //* support scale mode 
+            status_t        enableScaleMode(bool enable, int width, int height);
+            /* add by Gary. end   -----------------------------------}} */
+            /* add by Gary. start {{----------------------------------- */
+			/* 2012-03-07 */
+            //* set audio channel mute 
+            status_t        setChannelMuteMode(int muteMode);
+            int             getChannelMuteMode();
+            /* add by Gary. end   -----------------------------------}} */
+
+            /* add by Gary. start {{----------------------------------- */
+            /* 2012-03-12 */
+            /* add the global interfaces to control the subtitle gate  */
+            static  status_t        setGlobalSubGate(bool showSub);
+            static  bool            getGlobalSubGate();
+			/* 2012-4-24 */
+			/* add two general interfaces for expansibility */
+					status_t        generalInterface(int cmd, int int1, int int2, int int3, void *p);
+			static  status_t        generalGlobalInterface(int cmd, int int1, int int2, int int3, void *p);
+			/* add by Gary. end   -----------------------------------}} */
+			/* add by aw. start {{----------------------------------- */
+			static  status_t        getMediaPlayerList();
+			static  status_t        getMediaPlayerInfo(int mediaPlayerId, struct MediaPlayerInfo* mediaPlayerInfo);
+			/* add by aw. end   -----------------------------------}} */
 private:
             void            clear_l();
             status_t        seekTo_l(int msec);
@@ -289,6 +347,19 @@ private:
     float                       mSendLevel;
     struct sockaddr_in          mRetransmitEndpoint;
     bool                        mRetransmitEndpointValid;
+    /* add by Gary. start {{----------------------------------- */
+    /* 2011-9-28 16:28:24 */
+    /* save properties before creating the real player */
+    bool                        mSubGate;
+    int                         mSubDelay;
+    char                        mSubCharset[MEDIAPLAYER_NAME_LEN_MAX];
+    int                         mMuteMode;   // 2012-03-07, set audio channel mute
+   /* add by Gary. end   -----------------------------------}} */ 
+   //aw extend. For directory open, record DirId. eric_wang. 20140304
+   int  mAWExtendDirId;
+   DIR  *mAWExtendDp;
+   int  mBDFolderPlayMode;  //true: BD folder play. false:normal play.
+   //aw extend end. For directory open, record DirId. eric_wang. 20140304
 };
 
 }; // namespace android

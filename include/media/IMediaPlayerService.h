@@ -91,6 +91,22 @@ public:
 
     virtual void addBatteryData(uint32_t params) = 0;
     virtual status_t pullBatteryData(Parcel* reply) = 0;
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-03-12 */
+    /* add the global interfaces to control the subtitle gate  */
+    virtual status_t        setGlobalSubGate(bool showSub) = 0;
+    virtual bool            getGlobalSubGate() = 0;
+    /* add by Gary. end   -----------------------------------}} */
+
+    /* add by Gary. start {{----------------------------------- */
+    /* 2012-4-24 */
+    /* add two general interfaces for expansibility */
+    virtual status_t        generalGlobalInterface(int cmd, int int1, int int2, int int3, void *p) = 0;
+    /* add by Gary. end   -----------------------------------}} */
+	/* add by aw start {{----------------------------------- */
+	virtual  status_t        getMediaPlayerList() = 0;
+	virtual  status_t        getMediaPlayerInfo(int mediaPlayerId, struct MediaPlayerInfo* mediaPlayerInfo) = 0;
+	/* add by aw end   -----------------------------------}} */
 };
 
 // ----------------------------------------------------------------------------

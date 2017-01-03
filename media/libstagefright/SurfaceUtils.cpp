@@ -167,7 +167,8 @@ status_t pushBlankBuffersToNativeWindow(ANativeWindow *nativeWindow /* nonnull *
             break;
         }
 
-        *img = 0;
+		if(img != NULL)
+        	*img = 0;
 
         err = buf->unlock();
         if (err != NO_ERROR) {

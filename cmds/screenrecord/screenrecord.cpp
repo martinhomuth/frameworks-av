@@ -154,6 +154,12 @@ static status_t prepareEncoder(float displayFps, sp<MediaCodec>* pCodec,
                 gVideoWidth, gVideoHeight, kMimeTypeAvc, gBitRate / 1000000.0);
     }
 
+	gVideoWidth = (gVideoWidth + 31) & (~31);
+	if((gVideoWidth >= 1920 && gVideoHeight >= 1080) || (gVideoWidth >= 1080 && gVideoHeight >= 1920))
+	{
+        gBitRate = 10000000;
+    }
+
     sp<AMessage> format = new AMessage;
     format->setInt32("width", gVideoWidth);
     format->setInt32("height", gVideoHeight);
